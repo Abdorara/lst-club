@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>رواد العلوم والتكنولوجيا | LST</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🔬</text></svg>">
+<style>
+:root{--bg:#f4f7fb;--card:#fff;--tx:#14213d;--mut:#6b7a90;--pri:#2563eb;--acc:#14b8a6;--bd:#e3e9f2}
+@media(prefers-color-scheme:dark){:root{--bg:#0e1525;--card:#16203a;--tx:#eaf0fb;--mut:#9aa8c0;--bd:#26324f}}
+*{box-sizing:border-box;margin:0;font-family:system-ui,"Segoe UI",Tahoma,sans-serif}
+body{background:var(--bg);color:var(--tx);min-height:100vh;padding-bottom:40px}
+header{background:linear-gradient(135deg,var(--pri),var(--acc));color:#fff;padding:18px 16px;display:flex;justify-content:space-between;align-items:center}
+header h1{font-size:1.05rem}
+header h1 small{font-size:.7em;opacity:.85;margin-right:6px;letter-spacing:1px}
+.wrap{max-width:720px;margin:auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:16px;margin-bottom:14px}
+input,select,textarea{width:100%;padding:12px;margin:6px 0 10px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);color:var(--tx);font-size:1rem}
+button{background:var(--pri);color:#fff;border:0;padding:11px 18px;border-radius:10px;font-size:.95rem;cursor:pointer}
+button.ghost{background:transparent;border:1px solid currentColor}
+button.red{background:#dc2626}
+button.on{background:var(--acc)}
+.tag{display:inline-block;background:var(--bg);color:var(--pri);padding:3px 10px;border-radius:20px;font-size:.8rem}
+.meta{color:var(--mut);font-size:.85rem;margin:6px 0}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:space-between}
+.chips{display:flex;gap:8px;overflow-x:auto;margin-bottom:14px}
+.chips button{background:var(--card);color:var(--tx);border:1px solid var(--bd);white-space:nowrap}
+.chips button.on{background:var(--pri);color:#fff}
+.hero{text-align:center;padding:30px 10px}
+.hero h2{margin-bottom:8px}
+.err{color:#dc2626;font-size:.9rem;min-height:20px}
+a{color:var(--pri)}
+</style>
+</head>
+<body>
+<header>
+  <h1>🔬 رواد العلوم والتكنولوجيا <small>LST</small></h1>
+  <div id="userbox"></div>
+</header>
+<div class="wrap" id="app"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const SUPABASE_URL = "https://dmagxcyfruoftyrqgizs.supabase.co/rest/v1/";
+const SUPABASE_KEY = "sb_publishable_t2vYxxb_yG__LZ7EV6rO6A_Q9B0b5uK";
+const CATS = ["ورشة","محاضرة","مسابقة","رحلة"];
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+let me = null, posts = [], regs = [], filter = "الكل", mode = "login", msg = "";
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+async function loadData(){
+  const a = await sb.from("activities").select("*").order("event_date");
+  const r = await sb.from("registrations").select("activity_id,card");
+  posts = a.data || []; regs = r.data || [];
+}
+async function loadMe(){
+  const { data } = await sb.from("students").select("*").maybeSingle();
+  me = data;
+  if (me) await loadData();
+}
+
+async function submitAuth(){
+  const card = document.getElementById("card").value.trim();
+  const pass = document.getElementById("pass").value;
+  if (!/^\d{6,12}$/.test(card)) { msg = "رقم البطاقة يجب أن يكون من 6 إلى 12 رقماً"; return render(); }
+  if (pass.length < 6) { msg = "كلمة المرور 6 أحرف على الأقل"; return render(); }
+  const email = card + "@club.local";
+  const res = mode === "signup"
+    ? await sb.auth.signUp({ email, password: pass })
+    : await sb.auth.signInWithPassword({ email, password: pass });
+  if (res.error) {
+    msg = mode === "signup" ? "هذه البطاقة غير مسجلة في النادي أو لها حساب مسبق" : "رقم البطاقة أو كلمة المرور غير صحيحة";
+    return render();
+  }
+  msg = ""; await loadMe(); render();
+}
+async function logout(){ await sb.auth.signOut(); me = null; posts = []; regs = []; render(); }
+function setMode(m){ mode = m; msg = ""; render(); }
+function setFilter(f){ filter = f; render(); }
+
+async function addPost(){
+  const g = id => document.getElementById(id).value.trim();
+  const row = { title: g("t"), category: g("c"), event_date: g("d"), place: g("p"), description: g("ds") };
+  if (!row.title || !row.event_date) return alert("العنوان والتاريخ مطلوبان");
+  const { error } = await sb.from("activities").insert(row);
+  if (error) return alert("تعذّر النشر");
+  await loadData(); render();
+}
+async function delPost(id){
+  if (!confirm("حذف هذا النشاط؟")) return;
+  await sb.from("activities").delete().eq("id", id);
+  await loadData(); render();
+}
+async function toggleJoin(id){
+  const joined = regs.some(r => r.activity_id === id && r.card === me.card);
+  if (joined) await sb.from("registrations").delete().match({ activity_id: id, card: me.card });
+  else await sb.from("registrations").insert({ activity_id: id, card: me.card });
+  await loadData(); render();
+}
+
+function render(){
+  const app = document.getElementById("app");
+  const ub = document.getElementById("userbox");
+
+  if (!me) {
+    ub.innerHTML = "";
+    app.innerHTML = `
+      <div class="hero"><h2>مرحباً بك في نادي رواد العلوم والتكنولوجيا (LST)</h2>
+      <p class="meta">${mode === "signup" ? "أنشئ حسابك ببطاقة الطالب (للأعضاء المسجلين فقط)" : "سجّل الدخول ببطاقة الطالب"}</p></div>
+      <div class="card">
+        <label>رقم بطاقة الطالب</label>
+        <input id="card" inputmode="numeric" placeholder="مثال: 202312345">
+        <label>كلمة المرور</label>
+        <input id="pass" type="password" placeholder="6 أحرف على الأقل">
+        <div class="err">${esc(msg)}</div>
+        <button onclick="submitAuth()" style="width:100%">${mode === "signup" ? "إنشاء حساب" : "دخول"}</button>
+        <p class="meta" style="text-align:center;margin-top:12px">
+          ${mode === "signup"
+            ? `لديك حساب؟ <a href="#" onclick="setMode('login');return false">سجّل الدخول</a>`
+            : `أول مرة؟ <a href="#" onclick="setMode('signup');return false">أنشئ حسابك</a>`}
+        </p>
+      </div>`;
+    return;
+  }
+
+  ub.innerHTML = `<span style="font-size:.85rem">${esc(me.full_name)}${me.is_admin ? " ⭐" : ""}</span>
+    <button class="ghost" style="color:#fff;padding:6px 10px;margin-right:6px" onclick="logout()">خروج</button>`;
+
+  const admin = me.is_admin ? `
+    <div class="card">
+      <h3>➕ نشر نشاط جديد</h3>
+      <input id="t" placeholder="عنوان النشاط">
+      <select id="c">${CATS.map(c => `<option>${c}</option>`).join("")}</select>
+      <input id="d" type="date">
+      <input id="p" placeholder="المكان">
+      <textarea id="ds" rows="3" placeholder="وصف النشاط"></textarea>
+      <button onclick="addPost()">نشر</button>
+    </div>` : "";
+
+  const chips = ["الكل", ...CATS].map(c =>
+    `<button class="${c === filter ? "on" : ""}" onclick="setFilter('${c}')">${c}</button>`).join("");
+
+  const list = posts.filter(p => filter === "الكل" || p.category === filter).map(p => {
+    const count = regs.filter(r => r.activity_id === p.id).length;
+    const joined = regs.some(r => r.activity_id === p.id && r.card === me.card);
+    return `<div class="card">
+      <div class="row"><span class="tag">${esc(p.category)}</span><span class="meta">👥 ${count} مسجّل</span></div>
+      <h3 style="margin-top:8px">${esc(p.title)}</h3>
+      <div class="meta">📅 ${esc(p.event_date)} &nbsp; 📍 ${esc(p.place || "سيُحدد لاحقاً")}</div>
+      <p>${esc(p.description)}</p>
+      <div class="row" style="margin-top:10px">
+        <button class="${joined ? "on" : ""}" onclick="toggleJoin(${p.id})">${joined ? "✓ أنت مسجّل" : "سجّل مشاركتك"}</button>
+        ${me.is_admin ? `<button class="red" onclick="delPost(${p.id})">حذف</button>` : ""}
+      </div>
+    </div>`;
+  }).join("") || `<p class="meta" style="text-align:center">لا توجد نشاطات في هذا القسم</p>`;
+
+  app.innerHTML = admin + `<div class="chips">${chips}</div>` + list;
+}
+
+(async () => {
+  const { data } = await sb.auth.getSession();
+  if (data.session) await loadMe();
+  render();
+})();
+</script>
+</body>
+</html>
